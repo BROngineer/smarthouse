@@ -72,11 +72,11 @@ fn test_report_device_invalid() {
   Room kitchen: 
     Device socket-1: on
   Room kitchen: 
-    Device thermo-1: does not exist in the room kitchen.
+    Device thermo-1: device does not exist
   Room hall: 
     Device socket-1: off
   Room hall: 
-    Device socket-3: does not exist in the room hall.
+    Device socket-3: device does not exist
 ";
 
     assert_eq!(sh.create_report(provider2), report);
@@ -101,8 +101,8 @@ fn test_report_room_invalid() {
     ]);
 
     let report = "Report for house: sample SmartHouse
-  Room bedroom: does not exist in the house.
-  Room bedroom: does not exist in the house.
+  Room bedroom: room does not exist
+  Room bedroom: room does not exist
   Room kitchen: 
     Device socket-1: on
   Room kitchen: 

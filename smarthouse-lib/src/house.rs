@@ -1,6 +1,8 @@
+use super::error::SmartHouseError;
 use super::providers::DeviceInfoProvider;
 
 // Device defines the device object
+#[derive(Debug, PartialEq, Eq)]
 pub struct Device<'a> {
     name: &'a str,
     state: &'a str,
@@ -13,6 +15,7 @@ impl<'a> Device<'a> {
 }
 
 // Room defines room object and devices it contains
+#[derive(Debug, PartialEq, Eq)]
 pub struct Room<'a> {
     name: &'a str,
     devices: [&'a Device<'a>; 2],
@@ -25,6 +28,7 @@ impl<'a> Room<'a> {
 }
 
 // SmartHOuse defines house object and rooms it contains
+#[derive(Debug)]
 pub struct SmartHouse<'a> {
     name: &'a str,
     rooms: [&'a Room<'a>; 2],
@@ -35,46 +39,43 @@ impl<'a> SmartHouse<'a> {
         SmartHouse { name, rooms }
     }
 
-    pub fn get_rooms(&self) -> [&str; 2] {
+    pub fn rooms(&self) -> [&str; 2] {
         [self.rooms[0].name, self.rooms[1].name]
     }
 
-    pub fn devices(&self, room_name: &str) -> [&str; 2] {
+    pub fn get_room(&self, room_name: &str) -> Result<&Room, SmartHouseError> {
         for room in self.rooms {
             if room.name == room_name {
-                return [room.devices[0].name, room.devices[1].name];
+                return Ok(room);
             }
         }
-        ["", ""]
+        Err(SmartHouseError::RoomNotExist)
     }
 
-    pub fn is_room_exist(&self, room_name: &str) -> bool {
-        let mut result = false;
-        let rooms = self.get_rooms();
-        for room in rooms {
-            if room == room_name {
-                result = true;
-                return result;
+    pub fn devices(&self, room_name: &str) -> Result<[&str; 2], SmartHouseError> {
+        for room in self.rooms {
+            if room.name == room_name {
+                return Ok([room.devices[0].name, room.devices[1].name]);
             }
         }
-        result
+        Err(SmartHouseError::RoomNotExist)
     }
 
-    pub fn is_device_exist(&self, room_name: &str, device_name: &str) -> bool {
-        let mut result = false;
-        let rooms = self.get_rooms();
-        for room in rooms {
-            if room == room_name {
-                let devices = self.devices(room);
-                for dev in devices {
-                    if dev == device_name {
-                        result = true;
-                        return result;
-                    }
-                }
+    pub fn get_device(
+        &self,
+        room_name: &str,
+        device_name: &str,
+    ) -> Result<&Device, SmartHouseError> {
+        let room = match self.get_room(room_name) {
+            Ok(r) => r,
+            Err(e) => return Err(e),
+        };
+        for device in room.devices {
+            if device.name == device_name {
+                return Ok(device);
             }
         }
-        result
+        Err(SmartHouseError::DeviceNotExist)
     }
 
     pub fn create_report<T>(&self, provider: T) -> String
@@ -86,26 +87,18 @@ impl<'a> SmartHouse<'a> {
         let devices_info = provider.get_devices_info();
         for pair in devices_info {
             report.push_str(format!("  Room {}: ", pair.0).as_str());
-            if !self.is_room_exist(pair.0) {
-                report.push_str("does not exist in the house.\n");
-                continue;
-            }
-            for room in self.rooms {
-                if room.name != pair.0 {
+            let room = match self.get_room(pair.0) {
+                Ok(r) => r,
+                Err(e) => {
+                    report.push_str(format!("{}\n", e).as_str());
                     continue;
                 }
-                report.push_str(format!("\n    Device {}: ", pair.1).as_str());
-                if !self.is_device_exist(pair.0, pair.1) {
-                    report.push_str(format!("does not exist in the room {}.\n", pair.0).as_str());
-                    continue;
-                }
-                for dev in room.devices {
-                    if dev.name != pair.1 {
-                        continue;
-                    }
-                    report.push_str(format!("{}\n", dev.state).as_str());
-                }
-            }
+            };
+            report.push_str(format!("\n    Device {}: ", pair.1).as_str());
+            match self.get_device(room.name, pair.1) {
+                Ok(d) => report.push_str(format!("{}\n", d.state).as_str()),
+                Err(e) => report.push_str(format!("{}\n", e).as_str()),
+            };
         }
         report
     }
@@ -173,28 +166,56 @@ mod tests {
     }
 
     #[test]
-    fn test_get_rooms() {
+    fn test_rooms() {
         let sh = seed_house();
-        assert_eq!(sh.get_rooms(), ["kitchen", "hall"]);
+        let expected = ["kitchen", "hall"];
+        assert_eq!(sh.rooms(), expected);
+    }
+
+    #[test]
+    fn test_get_room() {
+        let socket1_kitchen = Device::new("socket-1", "on");
+        let socket2_kitchen = Device::new("socket-2", "off");
+        let socket1_hall = Device::new("socket-1", "off");
+        let socket2_hall = Device::new("socket-2", "on");
+        let room1 = Room::new("kitchen", [&socket1_kitchen, &socket2_kitchen]);
+        let room2 = Room::new("hall", [&socket1_hall, &socket2_hall]);
+        let sh = SmartHouse::new("sample SmartHouse", [&room1, &room2]);
+        assert_eq!(sh.get_room("hall").unwrap(), &room2);
+        assert_eq!(
+            sh.get_room("bedroom").unwrap_err(),
+            SmartHouseError::RoomNotExist
+        )
     }
 
     #[test]
     fn test_devices() {
         let sh = seed_house();
-        assert_eq!(sh.devices("hall"), ["socket-1", "socket-2"]);
+        let expected = ["socket-1", "socket-2"];
+        assert_eq!(sh.devices("hall").unwrap(), expected);
+        assert_eq!(
+            sh.devices("bedroom").unwrap_err(),
+            SmartHouseError::RoomNotExist
+        )
     }
 
     #[test]
-    fn test_is_room_exist() {
-        let sh = seed_house();
-        assert_eq!(sh.is_room_exist("hall"), true);
-        assert_eq!(sh.is_room_exist("bathroom"), false);
-    }
-
-    #[test]
-    fn test_is_device_exist() {
-        let sh = seed_house();
-        assert_eq!(sh.is_device_exist("hall", "socket-1"), true);
-        assert_eq!(sh.is_device_exist("kitchen", "thermo-1"), false);
+    fn test_get_device() {
+        let socket1_kitchen = Device::new("socket-1", "on");
+        let socket2_kitchen = Device::new("socket-2", "off");
+        let socket1_hall = Device::new("socket-1", "off");
+        let socket2_hall = Device::new("socket-2", "on");
+        let room1 = Room::new("kitchen", [&socket1_kitchen, &socket2_kitchen]);
+        let room2 = Room::new("hall", [&socket1_hall, &socket2_hall]);
+        let sh = SmartHouse::new("sample SmartHouse", [&room1, &room2]);
+        assert_eq!(sh.get_device("hall", "socket-1").unwrap(), &socket1_hall);
+        assert_eq!(
+            sh.get_device("bedroom", "socket-1").unwrap_err(),
+            SmartHouseError::RoomNotExist
+        );
+        assert_eq!(
+            sh.get_device("kitchen", "socket-3").unwrap_err(),
+            SmartHouseError::DeviceNotExist
+        )
     }
 }
